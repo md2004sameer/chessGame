@@ -22,4 +22,12 @@ public abstract class Piece {
         return movementStrategy.canMove(board, start, end);
     }
     public abstract String getDisplayChar();
+
+    /**
+     * Returns a short type identifier for the piece (lowercase), e.g. "pawn", "queen".
+     * This is safer for templates than calling getClass().getSimpleName() there.
+     */
+    public String getType() {
+        return this.getClass().getSimpleName().toLowerCase();
+    }
 }

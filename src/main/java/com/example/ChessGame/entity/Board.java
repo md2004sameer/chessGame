@@ -2,20 +2,13 @@ package com.example.ChessGame.entity;
 
 public class Board {
     Cell[][] cells;
-    public static Board board;
-    private Board() {
+    public Board() {
         cells = new Cell[8][8];
         for (int i = 0; i < 8; i++) {
             for (int j = 0; j < 8; j++) {
                 cells[i][j] = new Cell(i, j, null, (i + j) % 2 != 0);
             }
         }
-    }
-    public static Board getBoard() {
-        if (board == null) {
-            board = new Board();
-        }
-        return board;
     }
     public boolean isCellEmpty(int x, int y) {
         return cells[x][y].getPiece() == null;

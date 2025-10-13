@@ -3,93 +3,326 @@
 <head>
     <title>Chess Game</title>
     <style>
+        /* Base styles - Standard Theme */
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
         }
+
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        /* Game info panel */
+        .game-info {
+            margin: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+
+        .player-info {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .player-tag {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #f8f9fa;
+            border-radius: 20px;
+            font-weight: 600;
+            border: 1px solid #dee2e6;
+        }
+
+        .ai-badge {
+            background: #6c757d;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        /* Chess board - Standard appearance */
         .board {
-            width: 400px;
-            height: 400px;
+            width: 480px;
+            height: 480px;
             margin: 20px auto;
-            border: 2px solid #333;
+            border: 1px solid #333;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            background: #8B4513; /* Wood color for border */
         }
+
         .row {
-            height: 50px;
+            height: 60px;
             display: flex;
         }
+
         .cell {
-            width: 50px;
-            height: 50px;
+            width: 60px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 30px;
+            font-size: 40px;
             cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
         }
-        .cell.white { background-color: #fff; }
-        .cell.black { background-color: #999; }
+
+        .cell.white { 
+            background-color: #f0d9b5; /* Standard light square color */
+        }
+        
+        .cell.black { 
+            background-color: #b58863; /* Standard dark square color */
+        }
+
+        .cell:hover {
+            background-color: rgba(106, 190, 255, 0.3) !important;
+        }
+
         .cell.selected {
-            background-color: #7fc97f !important;
+            background-color: #aec6cf !important; /* Light blue for selected */
         }
+
         .cell.valid-move {
-            background-color: #90EE90 !important;
-            cursor: pointer;
+            position: relative;
         }
-        .coordinates {
-            font-size: 12px;
-            color: #666;
+
+        .cell.valid-move::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: rgba(0, 128, 0, 0.5);
+            border-radius: 50%;
         }
-        .game-info {
-            margin: 20px;
+
+        /* Captured pieces sections */
+        .captured-section {
+            min-width: 120px;
+            text-align: center;
+            background: white;
             padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 4px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
+
+        .captured-section h4 {
+            margin: 6px 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 5px;
+        }
+
+        .captured-section span {
+            font-size: 20px;
+            margin: 4px;
+            display: inline-block;
+        }
+
+        /* Layout for board and captured pieces */
+        .board-container {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+
+        /* Move form and buttons */
         .move-form {
             margin: 20px;
             text-align: center;
         }
-        input[type="text"] {
-            padding: 5px;
-            margin: 0 5px;
+
+        .move-form > div {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
         }
+
         button {
-            padding: 8px 16px;
-            background-color: #4CAF50;
+            padding: 10px 20px;
+            background: #2c3e50;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            margin: 0 5px;
+            margin: 0 10px;
+            font-weight: 500;
+            transition: all 0.2s ease;
         }
-        button:hover { background-color: #45a049; }
-        .resign { background-color: #f44336; }
-        .resign:hover { background-color: #da190b; }
+
+        button:hover { 
+            background: #34495e;
+        }
+
+        .resign { 
+            background: #e74c3c;
+        }
+
+        .resign:hover { 
+            background: #c0392b;
+        }
+
+        /* Player role indicator */
+        .player-role {
+            font-weight: 600;
+            color: #2c3e50;
+            background: #ecf0f1;
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid #bdc3c7;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 600px) {
+            .board {
+                width: 320px;
+                height: 320px;
+            }
+            
+            .cell {
+                width: 40px;
+                height: 40px;
+                font-size: 26px;
+            }
+            
+            .row {
+                height: 40px;
+            }
+            
+            .player-info {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .board-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .captured-section {
+                width: 80%;
+            }
+        }
+
+        /* Celebration overlay for wins */
+        .celebration-overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.25);
+            z-index: 9999;
+            pointer-events: none; /* allow clickthrough except controls inside */
+        }
+
+        .celebration-card {
+            background: rgba(255,255,255,0.95);
+            padding: 22px 28px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            text-align: center;
+            pointer-events: auto;
+        }
+
+        .celebration-message {
+            font-size: 22px;
+            font-weight: 800;
+            color: #22303a;
+            margin-bottom: 8px;
+        }
+
+        .celebration-sub {
+            color: #56646e;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
 <body>
     <div class="game-info">
-        <h2 th:text="'Current Turn: ' + ${currentPlayer.name} + ' (' + (${currentPlayer.white} ? 'White' : 'Black') + ')'"></h2>
-        <p th:if="${gameStatus.name() == 'ACTIVE'}" th:text="${currentPlayer.name} + '\'s turn to move'"></p>
-        <p th:if="${gameStatus.name() != 'ACTIVE'}" th:text="'Game Status: ' + ${gameStatus}"></p>
+        <h2 th:text="'Current Turn: ' + ${currentPlayer.name} + ' (' + (${currentPlayer.white} ? 'White' : 'Black') + ')'">Current Turn</h2>
+        <p th:if="${gameStatus.name() == 'ACTIVE'}" th:text="${currentPlayer.name} + '\'s turn to move'">Player's turn</p>
+        <p th:if="${gameStatus.name() != 'ACTIVE'}" th:text="'Game Status: ' + ${gameStatus}">Game Status</p>
+        <div class="player-info">
+            <div class="player-tag">
+                <div th:text="${whitePlayer.name} + ' (White)'"></div>
+                <div th:if="${whiteIsAI}" class="ai-badge">AI</div>
+            </div>
+            <div class="player-tag">
+                <div th:text="${blackPlayer.name} + ' (Black)'"></div>
+                <div th:if="${blackIsAI}" class="ai-badge">AI</div>
+            </div>
+        </div>
     </div>
 
-    <div class="board">
-        <div th:each="row,rowStat : ${positions}" class="row">
-            <div th:each="position,colStat : ${row}"
-                 th:class="'cell ' + (${(rowStat.index + colStat.index) % 2 == 0} ? 'white' : 'black')"
-                 th:data-position="${position}">
-                <span th:text="${board.getCell(rowStat.index, colStat.index).piece?.getDisplayChar()}"></span>
+    <div class="board-container">
+        <div class="captured-section">
+            <h4>Captured (White)</h4>
+            <div>
+                <span th:each="p : ${capturedWhite}" th:text="${p.displayChar}"></span>
+            </div>
+        </div>
+
+        <div class="board" id="board">
+            <!-- iterate server-provided viewRowIndices to render rows in the correct orientation -->
+            <div th:each="rIndex : ${viewRowIndices}" class="row" th:data-row-index="${rIndex}">
+                <div th:each="c : ${#numbers.sequence(0,7)}"
+                     th:class="'cell ' + (${(rIndex + c) % 2 == 0} ? 'white' : 'black')"
+                     th:data-position="${positions[rIndex][c]}"
+                     th:data-row="${rIndex}"
+                     th:data-col="${c}">
+                    <span th:text="${board.getCell(rIndex, c).piece?.getDisplayChar()}"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="captured-section">
+            <h4>Captured (Black)</h4>
+            <div>
+                <span th:each="p : ${capturedBlack}" th:text="${p.displayChar}"></span>
             </div>
         </div>
     </div>
 
     <div class="move-form">
-        <form action="/resign" method="post" style="display: inline;">
-            <button type="submit" class="resign">Resign</button>
-        </form>
+        <div>
+            <form action="/resign" method="post" style="display: inline;">
+                <button type="submit" class="resign">Resign</button>
+            </form>
+            <form action="/exit" method="post" style="display: inline;">
+                <button type="submit" style="background:#6c757d;">Exit Game</button>
+            </form>
+            <div class="player-role">
+                <span th:if="${viewAsWhite}" th:text="'You are playing: ' + (${whiteIsAI} ? 'AI (White)' : 'White')"></span>
+                <span th:unless="${viewAsWhite}" th:text="'You are playing: ' + (${blackIsAI} ? 'AI (Black)' : 'Black')"></span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -131,27 +364,104 @@
             });
         }
 
-        document.querySelectorAll('.cell').forEach(cell => {
-            cell.addEventListener('click', () => {
-                const position = cell.dataset.position;
+        function attachCellListeners() {
+            document.querySelectorAll('.cell').forEach(cell => {
+                cell.addEventListener('click', () => {
+                    const position = cell.dataset.position;
 
-                if (!selectedCell) {
-                    // First click - select piece and show valid moves
-                    if (cell.querySelector('span').textContent.trim()) {
-                        selectedCell = cell;
-                        cell.classList.add('selected');
-                        highlightValidMoves(position);
+                    if (!selectedCell) {
+                        // First click - select piece and show valid moves
+                        if (cell.querySelector('span').textContent.trim()) {
+                            selectedCell = cell;
+                            cell.classList.add('selected');
+                            highlightValidMoves(position);
+                        }
+                    } else {
+                        // Second click - make the move if valid
+                        if (validMoves.includes(position)) {
+                            makeMove(selectedCell.dataset.position, position);
+                        }
+                        clearHighlights();
+                        selectedCell = null;
                     }
-                } else {
-                    // Second click - make the move if valid
-                    if (validMoves.includes(position)) {
-                        makeMove(selectedCell.dataset.position, position);
-                    }
-                    clearHighlights();
-                    selectedCell = null;
-                }
+                });
             });
-        });
+        }
+
+        attachCellListeners();
+
+        // Server controls initial orientation; no client-side flip applied to avoid mismatch with server coordinates.
+    </script>
+
+    <!-- Celebration overlay: shown when someone wins -->
+    <div th:if="${gameStatus.name().contains('WON') or gameStatus.name().contains('MATE')}" class="celebration-overlay" id="celebration">
+        <div class="celebration-card">
+            <div class="celebration-message" th:text="${gameStatus.name().contains('WON') ? (currentPlayer.name + ' wins!') : (currentPlayer.name + ' wins by mate!')}">Victory!</div>
+            <div class="celebration-sub" th:text="'Winner: ' + ${currentPlayer.name}">Winner: Player</div>
+            <div>
+                <form action="/exit" method="post" style="display:inline;"><button type="submit">Back to Start</button></form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // minimal confetti using canvas
+        (function(){
+            const overlay = document.getElementById('celebration');
+            if (!overlay) return;
+
+            // create canvas
+            const canvas = document.createElement('canvas');
+            canvas.style.position = 'fixed';
+            canvas.style.left = 0;
+            canvas.style.top = 0;
+            canvas.style.pointerEvents = 'none';
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            canvas.id = 'confettiCanvas';
+            overlay.appendChild(canvas);
+
+            const ctx = canvas.getContext('2d');
+            const pieces = [];
+            const colors = ['#ffcd4a','#ff6b6b','#6bffb8','#6bb7ff','#c996ff'];
+
+            for (let i=0;i<120;i++) {
+                pieces.push({
+                    x: Math.random()*canvas.width,
+                    y: Math.random()*canvas.height - canvas.height,
+                    vx: (Math.random()-0.5)*3,
+                    vy: 2 + Math.random()*4,
+                    size: 6 + Math.random()*10,
+                    color: colors[Math.floor(Math.random()*colors.length)],
+                    rot: Math.random()*360
+                });
+            }
+
+            let t = 0;
+            function draw() {
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                t++;
+                for (const p of pieces) {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.rot += p.vx*3;
+                    ctx.save();
+                    ctx.translate(p.x,p.y);
+                    ctx.rotate(p.rot*Math.PI/180);
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.size/2,-p.size/2,p.size,p.size*0.6);
+                    ctx.restore();
+                }
+                requestAnimationFrame(draw);
+            }
+
+            draw();
+
+            // stop confetti after 6s and remove canvas
+            setTimeout(()=>{
+                overlay.removeChild(canvas);
+            }, 6000);
+        })();
     </script>
 </body>
 </html>
