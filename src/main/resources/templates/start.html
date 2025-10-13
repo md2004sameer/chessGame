@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Chess Game - Start</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .start-form {
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        input[type="text"] {
+            padding: 8px;
+            margin: 10px;
+            width: 200px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to Chess Game</h1>
+    <div class="start-form">
+        <h2>Enter Player Names</h2>
+        <form action="/start" method="post">
+            <div>
+                <label for="whitePlayerName">White Player:</label>
+                <input type="text" id="whitePlayerName" name="whitePlayerName" required>
+            </div>
+            <div>
+                <label for="blackPlayerName">Black Player:</label>
+                <input type="text" id="blackPlayerName" name="blackPlayerName" required>
+            </div>
+            <button type="submit">Start Game</button>
+        </form>
+    </div>
+</body>
+</html>
+
