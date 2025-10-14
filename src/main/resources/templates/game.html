@@ -3,13 +3,26 @@
 <head>
     <title>Chess Game</title>
     <style>
+        /* Standard CSS reset for layout */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        :root {
+            --board-size: 640px; /* default board size */
+            --cell-size: calc(var(--board-size) / 8);
+            --board-border: 12px;
+            --sidebar-width: 180px;
+            --gap: 18px;
+            --bg: #f5f5f5;
+            --muted: #2c3e50;
+        }
+
         /* Base styles - Standard Theme */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background: #f5f5f5;
+            background: var(--bg);
             color: #333;
             min-height: 100vh;
         }
@@ -59,32 +72,36 @@
             font-weight: bold;
         }
 
-        /* Chess board - Standard appearance */
+        /* Chess board - Standard appearance (grid-based, fluid) */
         .board {
-            width: 480px;
-            height: 480px;
+            width: var(--board-size);
+            height: var(--board-size);
             margin: 20px auto;
+            border-radius: 8px;
             border: 1px solid #333;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
             overflow: hidden;
             background: #8B4513; /* Wood color for border */
+            display: grid;
+            grid-template-rows: repeat(8, 1fr);
+            grid-template-columns: repeat(8, 1fr);
         }
 
-        .row {
-            height: 60px;
-            display: flex;
+        .row { /* kept for server markup but cells are grid children */
+            display: contents; /* allow grid children alignment */
         }
 
         .cell {
-            width: 60px;
-            height: 60px;
+            width: 100%;
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 40px;
+            font-size: calc(var(--board-size) / 11.5);
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
             position: relative;
+            padding: 6px;
         }
 
         .cell.white { 
@@ -110,8 +127,8 @@
         .cell.valid-move::after {
             content: '';
             position: absolute;
-            width: 20px;
-            height: 20px;
+            width: min(20px, calc(var(--cell-size) / 4));
+            height: min(20px, calc(var(--cell-size) / 4));
             background: rgba(0, 128, 0, 0.5);
             border-radius: 50%;
         }
@@ -143,11 +160,22 @@
         /* Layout for board and captured pieces */
         .board-container {
             display: flex;
-            gap: 12px;
+            gap: var(--gap);
             justify-content: center;
             align-items: flex-start;
             flex-wrap: wrap;
             margin: 20px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Default captured-section sizing (stack on small screens) */
+        .captured-section {
+            min-width: 120px;
+            max-width: var(--sidebar-width);
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
         }
 
         /* Move form and buttons */
@@ -199,34 +227,50 @@
         }
 
         /* Responsive adjustments */
-        @media (max-width: 600px) {
-            .board {
-                width: 320px;
-                height: 320px;
-            }
-            
-            .cell {
-                width: 40px;
-                height: 40px;
-                font-size: 26px;
-            }
-            
-            .row {
-                height: 40px;
-            }
-            
-            .player-info {
-                flex-direction: column;
-                gap: 8px;
-            }
-            
+        /* Small screens: scale down variables */
+        @media (max-width: 900px) {
+            :root { --board-size: 520px; }
+        }
+
+        @media (max-width: 700px) {
+            :root { --board-size: 420px; }
+        }
+
+        @media (max-width: 480px) {
+            :root { --board-size: 320px; }
+            .captured-section { width: 80%; }
+            .player-info { flex-direction: column; gap: 8px; }
+            .board-container { flex-direction: column; align-items: center; }
+        }
+
+        /* Laptop and wider: place captured pieces left and right of board */
+        @media (min-width: 900px) {
             .board-container {
-                flex-direction: column;
-                align-items: center;
+                flex-wrap: nowrap;
+                align-items: flex-start;
+                justify-content: center;
+                max-width: calc(var(--board-size) + 2 * var(--sidebar-width) + 2 * var(--gap)); /* board + two captured + gaps */
+                margin: 30px auto;
             }
-            
+
             .captured-section {
-                width: 80%;
+                flex: 0 0 var(--sidebar-width); /* fixed sidebar width */
+                width: var(--sidebar-width);
+            }
+
+            .board {
+                flex: 0 0 var(--board-size);
+                width: var(--board-size);
+                height: var(--board-size);
+                margin: 0;
+            }
+
+            /* Ensure captured lists wrap nicely */
+            .captured-section div {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 6px;
             }
         }
 
@@ -261,6 +305,29 @@
         .celebration-sub {
             color: #56646e;
             margin-bottom: 12px;
+        }
+        /* Confirm modal styles */
+        .confirm-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.4);
+            z-index: 10000;
+        }
+
+        .confirm-modal.show {
+            display: flex;
+        }
+
+        .confirm-card {
+            background: white;
+            padding: 20px 24px;
+            border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            max-width: 420px;
+            text-align: center;
         }
     </style>
 </head>
@@ -404,6 +471,18 @@
         </div>
     </div>
 
+    <!-- Confirmation modal (reused for exit/resign) -->
+    <div id="confirmModal" class="confirm-modal" aria-hidden="true">
+        <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+            <h3 id="confirmTitle">Confirm action</h3>
+            <p id="confirmMessage">Are you sure?</p>
+            <div style="display:flex; gap:12px; justify-content:center; margin-top:12px;">
+                <button id="confirmCancel" class="button button-secondary">Cancel</button>
+                <button id="confirmOk" class="button button-primary">Yes, continue</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // minimal confetti using canvas
         (function(){
@@ -463,5 +542,62 @@
             }, 6000);
         })();
     </script>
+
+            <script>
+                // Confirmation modal logic
+                const confirmModal = document.getElementById('confirmModal');
+                const confirmMessage = document.getElementById('confirmMessage');
+                const confirmOk = document.getElementById('confirmOk');
+                const confirmCancel = document.getElementById('confirmCancel');
+                let confirmResolve = null;
+
+                function showConfirm(message) {
+                    confirmMessage.textContent = message;
+                    confirmModal.classList.add('show');
+                    return new Promise((resolve) => { confirmResolve = resolve; });
+                }
+
+                function hideConfirm() {
+                    confirmModal.classList.remove('show');
+                    if (confirmResolve) { confirmResolve(false); confirmResolve = null; }
+                }
+
+                confirmCancel.addEventListener('click', () => { hideConfirm(); });
+                confirmOk.addEventListener('click', () => { if (confirmResolve) { confirmResolve(true); confirmResolve = null; } confirmModal.classList.remove('show'); });
+
+                // Intercept exit and resign forms
+                document.querySelectorAll('form[action="/exit"], form[action="/resign"]').forEach(form => {
+                    form.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const action = form.getAttribute('action');
+                        const confirmText = action === '/resign' ? 'Are you sure you want to resign? This cannot be undone.' : 'Are you sure you want to exit to the start screen? Your current game will be lost.';
+                        const ok = await showConfirm(confirmText);
+                        if (ok) form.submit();
+                    });
+                });
+
+                // Play a short celebration audio when overlay exists
+                (function playCelebrationAudio() {
+                    const overlay = document.getElementById('celebration');
+                    if (!overlay) return;
+                    try {
+                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        const o = audioCtx.createOscillator();
+                        const g = audioCtx.createGain();
+                        o.type = 'sine';
+                        o.frequency.setValueAtTime(880, audioCtx.currentTime);
+                        g.gain.setValueAtTime(0, audioCtx.currentTime);
+                        o.connect(g);
+                        g.connect(audioCtx.destination);
+                        o.start();
+                        g.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.02);
+                        o.frequency.linearRampToValueAtTime(1320, audioCtx.currentTime + 0.2);
+                        g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
+                        setTimeout(()=>o.stop(), 1400);
+                    } catch (e) {
+                        // ignore audio failures (autoplay policy etc.)
+                    }
+                })();
+            </script>
 </body>
 </html>
