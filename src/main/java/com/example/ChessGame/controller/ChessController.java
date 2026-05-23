@@ -126,6 +126,16 @@ public class ChessController {
     public String showRoom(@PathVariable String roomId, @RequestParam(required = false) String name, Model model) {
         model.addAttribute("roomId", roomId);
         model.addAttribute("playerName", name);
+        // expose playerToken to the template when available for this viewer
+        com.example.ChessGame.entity.Room roomEntity = null;
+        try { roomEntity = roomService.getRoom(roomId); } catch (Exception ignored) {}
+        if (roomEntity != null && name != null) {
+            if (name.equals(roomEntity.getCreatorName())) model.addAttribute("playerToken", roomEntity.getCreatorToken());
+            else if (name.equals(roomEntity.getJoinerName())) model.addAttribute("playerToken", roomEntity.getJoinerToken());
+            else model.addAttribute("playerToken", null);
+        } else {
+            model.addAttribute("playerToken", null);
+        }
         // reuse the same game view template - the page will use WebSockets to subscribe to the room
         model.addAttribute("positions", generatePositions());
 
@@ -191,15 +201,16 @@ public class ChessController {
         org.slf4j.LoggerFactory.getLogger(ChessController.class).info("REST join requested: roomId={}, playerName={}", roomId, playerName);
         java.util.Map<String, Object> resp = new java.util.HashMap<>();
         try {
-            String role = roomService.joinRoom(roomId, playerName);
+            com.example.ChessGame.service.RoomService.JoinResult joinResult = roomService.joinRoom(roomId, playerName, null);
             // allow idempotent rejoin by the creator (role == "white") — treat as success
             resp.put("success", true);
-            resp.put("role", role);
+            resp.put("role", joinResult.getRole());
+            resp.put("playerToken", joinResult.getPlayerToken());
             // broadcast updated state to any subscribed WS clients
             sendState(roomId);
             // also include the canonical state in the REST response so the client doesn't miss it
             resp.put("state", buildState(roomId));
-            org.slf4j.LoggerFactory.getLogger(ChessController.class).info("REST join success/rejoin: roomId={}, playerName={}, role={}", roomId, playerName, role);
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).info("REST join success/rejoin: roomId={}, playerName={}, role={}", roomId, playerName, joinResult.getRole());
             return resp;
         } catch (IllegalArgumentException e) {
             resp.put("success", false);
@@ -230,52 +241,7 @@ public class ChessController {
     private com.example.ChessGame.controller.dto.MoveResponse buildState(String roomId) {
         com.example.ChessGame.entity.Room room = roomService.getRoom(roomId);
         com.example.ChessGame.entity.Game game = roomService.getGame(roomId);
-        com.example.ChessGame.controller.dto.MoveResponse resp = new com.example.ChessGame.controller.dto.MoveResponse();
-        if (game == null) {
-            resp.setSuccess(false);
-            resp.setMessage("Waiting for opponent or invalid room");
-            if (room != null) {
-                resp.setRoomStatus(room.getStatus().toString());
-                resp.setPlayerCount(room.isFull() ? 2 : 1);
-            }
-            return resp;
-        }
-
-        java.util.List<java.util.List<com.example.ChessGame.controller.dto.MoveResponse.CellDto>> boardState = new java.util.ArrayList<>();
-        for (int r = 0; r < 8; r++) {
-            java.util.List<com.example.ChessGame.controller.dto.MoveResponse.CellDto> rowList = new java.util.ArrayList<>();
-            for (int c = 0; c < 8; c++) {
-                com.example.ChessGame.entity.Cell cell = game.getBoard().getCell(r, c);
-                com.example.ChessGame.controller.dto.MoveResponse.CellDto cellDto = new com.example.ChessGame.controller.dto.MoveResponse.CellDto();
-                char file = (char) ('a' + c);
-                int rank = 8 - r;
-                String pos = String.format("%c%d", file, rank);
-                cellDto.position = pos;
-                if (cell.getPiece() != null) {
-                    cellDto.display = cell.getPiece().getDisplayChar();
-                    cellDto.type = cell.getPiece().getType();
-                    cellDto.color = cell.getPiece().isWhite();
-                } else {
-                    cellDto.display = "";
-                    cellDto.type = "";
-                    cellDto.color = "";
-                }
-                rowList.add(cellDto);
-            }
-            boardState.add(rowList);
-        }
-        resp.setSuccess(true);
-        resp.setBoard(boardState);
-        resp.setCurrentPlayer(game.getCurrentTurn().getName());
-        resp.setGameStatus(game.getGameStatus().toString());
-        // include player names so clients can update UI when someone joins
-        resp.setWhitePlayerName(game.getWhitePlayer().getName());
-        resp.setBlackPlayerName(game.getBlackPlayer().getName());
-        if (room != null) {
-            resp.setRoomStatus(room.getStatus().toString());
-            resp.setPlayerCount(room.isFull() ? 2 : 1);
-        }
-        return resp;
+        return RoomStateBuilder.build(room, game);
     }
 
     // Broadcast room state to WS subscribers (used by REST join and rest-move as well)
@@ -297,9 +263,10 @@ public class ChessController {
                                                    @RequestParam String from,
                                                    @RequestParam String to,
                                                    @RequestParam(required = false) String promotion,
-                                                   @RequestParam String playerName) {
+                                                   @RequestParam String playerName,
+                                                   @RequestParam(required = false) String playerToken) {
         java.util.Map<String,Object> resp = new java.util.HashMap<>();
-        boolean ok = roomService.applyMove(roomId, from, to, promotion, playerName);
+        boolean ok = roomService.applyMove(roomId, from, to, promotion, playerName, playerToken);
         if (ok) {
             resp.put("success", true);
             // broadcast updated state
@@ -326,13 +293,18 @@ public class ChessController {
                                                       @RequestParam(required = false) String promotion,
                                                       HttpSession session) {
         // AJAX JSON response: apply move (and AI response if any) and return a compact board state
-        applyMoveWithPossibleAi(session, from, to, promotion);
+        MoveResult moveResult = applyMoveWithPossibleAi(session, from, to, promotion);
 
         com.example.ChessGame.controller.dto.MoveResponse resp = new com.example.ChessGame.controller.dto.MoveResponse();
         Game game = (Game) session.getAttribute("game");
         if (game == null) {
             resp.setSuccess(false);
             resp.setMessage("No game in progress");
+            return resp;
+        }
+        if (!moveResult.success) {
+            resp.setSuccess(false);
+            resp.setMessage("Invalid move");
             return resp;
         }
 
@@ -364,15 +336,26 @@ public class ChessController {
         resp.setBoard(boardState);
         resp.setCurrentPlayer(game.getCurrentTurn().getName());
         resp.setGameStatus(game.getGameStatus().toString());
+        resp.setWhitePlayerName(game.getWhitePlayer().getName());
+        resp.setBlackPlayerName(game.getBlackPlayer().getName());
+        resp.setPlayerMove(moveResult.playerMove);
+        resp.setAiMove(moveResult.aiMove);
         return resp;
     }
 
-    private void applyMoveWithPossibleAi(HttpSession session, String from, String to, String promotion) {
+    private MoveResult applyMoveWithPossibleAi(HttpSession session, String from, String to, String promotion) {
+        MoveResult result = new MoveResult();
         Game game = (Game) session.getAttribute("game");
         if (game != null) {
             Move move = (promotion == null) ? game.createMove(from, to) : game.createMove(from, to, promotion);
             if (move != null) {
-                game.makeMove(move, game.getCurrentTurn());
+                boolean moved = game.makeMove(move, game.getCurrentTurn());
+                if (!moved) {
+                    session.setAttribute("game", game);
+                    return result;
+                }
+                result.success = true;
+                result.playerMove = new com.example.ChessGame.controller.dto.MoveResponse.MoveDto(from, to, promotion);
                 // If either side is AI and it's now that side's turn, ask stockfish for a move
                 try {
                     boolean whiteIsAI = Boolean.TRUE.equals(session.getAttribute("whiteIsAI"));
@@ -387,7 +370,9 @@ public class ChessController {
                             String promo = null;
                             if (best.length() >= 5) promo = String.valueOf(best.charAt(4));
                             Move aiMove = (promo == null) ? game.createMove(fromAi, toAi) : game.createMove(fromAi, toAi, promo);
-                            if (aiMove != null) game.makeMove(aiMove, game.getCurrentTurn());
+                            if (aiMove != null && game.makeMove(aiMove, game.getCurrentTurn())) {
+                                result.aiMove = new com.example.ChessGame.controller.dto.MoveResponse.MoveDto(fromAi, toAi, promo);
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -397,6 +382,13 @@ public class ChessController {
         }
         // persist back
         session.setAttribute("game", game);
+        return result;
+    }
+
+    private static class MoveResult {
+        boolean success;
+        com.example.ChessGame.controller.dto.MoveResponse.MoveDto playerMove;
+        com.example.ChessGame.controller.dto.MoveResponse.MoveDto aiMove;
     }
 
     @PostMapping("/resign")
@@ -452,7 +444,8 @@ public class ChessController {
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 Cell end = game.getBoard().getCell(r, c);
-                if (start.getPiece().canMove(game.getBoard(), start, end)) {
+                Move candidate = new Move(start, end);
+                if (game.isLegalMove(candidate, game.getCurrentTurn())) {
                     char file = (char) ('a' + c);
                     int rank = 8 - r;
                     validMoves.add(String.format("%c%d", file, rank));
@@ -482,7 +475,8 @@ public class ChessController {
         for (int r = 0; r < 8; r++) {
             for (int c = 0; c < 8; c++) {
                 Cell end = game.getBoard().getCell(r, c);
-                if (start.getPiece().canMove(game.getBoard(), start, end)) {
+                Move candidate = new Move(start, end);
+                if (game.isLegalMove(candidate, game.getCurrentTurn())) {
                     char file = (char) ('a' + c);
                     int rank = 8 - r;
                     validMoves.add(String.format("%c%d", file, rank));

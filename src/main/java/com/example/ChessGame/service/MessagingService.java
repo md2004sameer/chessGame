@@ -30,4 +30,32 @@ public class MessagingService {
             return false;
         }
     }
+
+    /**
+     * Send a payload to a specific user session destination (private message).
+     * The destination should be the user-specific destination path (e.g. "/queue/rooms/{roomId}/token").
+     */
+    public boolean sendToUser(String sessionId, String destination, Object payload) {
+        if (sessionId == null || destination == null || payload == null) {
+            logger.warn("Attempted to sendToUser with null sessionId/destination/payload: {}, {}, {}", sessionId, destination, payload);
+            return false;
+        }
+        try {
+            org.springframework.messaging.simp.SimpMessageHeaderAccessor sha = org.springframework.messaging.simp.SimpMessageHeaderAccessor.create(org.springframework.messaging.simp.SimpMessageType.MESSAGE);
+            sha.setSessionId(sessionId);
+            sha.setLeaveMutable(true);
+            // Primary: try convertAndSendToUser with session header
+            template.convertAndSendToUser(sessionId, destination, payload, sha.getMessageHeaders());
+            // Fallback: also send to the explicit /user/{sessionId}{destination} path
+            try {
+                template.convertAndSend("/user/" + sessionId + destination, payload);
+            } catch (Exception ignore) {
+                // best-effort fallback; ignore failures here
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to send private message to {} on {}: {}", sessionId, destination, e.getMessage(), e);
+            return false;
+        }
+    }
 }

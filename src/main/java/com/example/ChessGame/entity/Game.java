@@ -30,6 +30,7 @@ public class Game implements Serializable {
         this.blackPlayer = blackPlayer;
         this.currentTurn = whitePlayer;
         this.board = new Board();
+        this.board.setEnPassantTarget(enPassantTarget);
         this.gameStatus = GameStatus.STARTED;
         this.gameStateChecker = new GameStateChecker(board);
         this.gameLog = new ArrayList<>();
@@ -48,9 +49,9 @@ public class Game implements Serializable {
         gameStatus = GameStatus.ACTIVE;
     }
 
-    public void makeMove(Move move, Player player) {
+    public boolean makeMove(Move move, Player player) {
         if (move == null || !isValidMove(move, player)) {
-            return;
+            return false;
         }
 
         // Execute the move
@@ -153,6 +154,7 @@ public class Game implements Serializable {
                 enPassantTarget = String.format("%c%d", file, rank);
             }
         }
+        board.setEnPassantTarget(enPassantTarget);
 
         // Handle promotion: if a pawn reached the last rank and promotion specified
         String promotion = move.getPromotion();
@@ -179,16 +181,17 @@ public class Game implements Serializable {
         // Check game ending conditions
         if (gameStateChecker.isCheckmate(!player.isWhite())) {
             gameStatus = player.isWhite() ? GameStatus.WHITE_WIN : GameStatus.BLACK_WIN;
-            return;
+            return true;
         }
 
         if (gameStateChecker.isStalemate(!player.isWhite())) {
             gameStatus = GameStatus.STALEMATE;
-            return;
+            return true;
         }
 
         // Switch turns
         switchTurn();
+        return true;
     }
 
     public java.util.List<Piece> getCapturedWhite() {
@@ -227,12 +230,105 @@ public class Game implements Serializable {
             return false;
         }
 
+        if (piece instanceof com.example.ChessGame.entity.piece.King && isCastlingMove(start, end)) {
+            if (!canCastle(start, end)) {
+                return false;
+            }
+        }
+
         // Check if the move would leave or put the king in check
         if (!isMoveSafe(start, end, player.isWhite())) {
             return false;
         }
 
         return piece.canMove(board, start, end);
+    }
+
+    public boolean isLegalMove(Move move, Player player) {
+        return isValidMove(move, player);
+    }
+
+    private boolean isCastlingMove(Cell start, Cell end) {
+        return start.getPiece() instanceof com.example.ChessGame.entity.piece.King &&
+               start.getRow() == end.getRow() &&
+               Math.abs(start.getCol() - end.getCol()) == 2;
+    }
+
+    private boolean canCastle(Cell start, Cell end) {
+        Piece king = start.getPiece();
+        if (king == null || !(king instanceof com.example.ChessGame.entity.piece.King)) {
+            return false;
+        }
+        if (gameStateChecker.isKingInCheck(king.isWhite())) {
+            return false;
+        }
+
+        int startRow = start.getRow();
+        int startCol = start.getCol();
+        int endCol = end.getCol();
+        boolean isWhite = king.isWhite();
+
+        if (isWhite && whiteKingMoved) {
+            return false;
+        }
+        if (!isWhite && blackKingMoved) {
+            return false;
+        }
+
+        int rookCol = endCol > startCol ? 7 : 0;
+        Cell rookCell = board.getCell(startRow, rookCol);
+        if (rookCell.getPiece() == null || !(rookCell.getPiece() instanceof com.example.ChessGame.entity.piece.Rook)) {
+            return false;
+        }
+        if (rookCell.getPiece().isWhite() != isWhite) {
+            return false;
+        }
+
+        if (isWhite && endCol == 6 && whiteHRookMoved) {
+            return false;
+        }
+        if (isWhite && endCol == 2 && whiteARookMoved) {
+            return false;
+        }
+        if (!isWhite && endCol == 6 && blackHRookMoved) {
+            return false;
+        }
+        if (!isWhite && endCol == 2 && blackARookMoved) {
+            return false;
+        }
+
+        int rangeStart = Math.min(startCol, rookCol) + 1;
+        int rangeEnd = Math.max(startCol, rookCol) - 1;
+        for (int col = rangeStart; col <= rangeEnd; col++) {
+            if (!board.isCellEmpty(startRow, col)) {
+                return false;
+            }
+        }
+
+        int throughCol = startCol + (endCol - startCol) / 2;
+        if (!isSquareSafeDuringCastling(start, throughCol)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean isSquareSafeDuringCastling(Cell start, int targetCol) {
+        Piece king = start.getPiece();
+        if (king == null) {
+            return false;
+        }
+
+        Cell targetCell = board.getCell(start.getRow(), targetCol);
+        Piece originalTarget = targetCell.getPiece();
+
+        start.setPiece(null);
+        targetCell.setPiece(king);
+        boolean safe = !gameStateChecker.isKingInCheck(king.isWhite());
+        start.setPiece(king);
+        targetCell.setPiece(originalTarget);
+
+        return safe;
     }
 
     private boolean isMoveSafe(Cell start, Cell end, boolean isWhite) {
@@ -249,8 +345,27 @@ public class Game implements Serializable {
             int capturedRow = end.getRow() + (startPiece.isWhite() ? 1 : -1);
             capturedCell = board.getCell(capturedRow, end.getCol());
             capturedPawn = capturedCell.getPiece();
-            // remove the captured pawn temporarily
             capturedCell.setPiece(null);
+        }
+
+        // For castling we must also move the rook during the safety simulation
+        boolean castling = false;
+        Cell rookStart = null;
+        Cell rookEnd = null;
+        Piece rookPiece = null;
+        if (startPiece instanceof com.example.ChessGame.entity.piece.King && isCastlingMove(start, end)) {
+            castling = true;
+            int startCol = start.getCol();
+            int endCol = end.getCol();
+            int rookCol = endCol > startCol ? 7 : 0;
+            int rookDestCol = endCol > startCol ? 5 : 3;
+            rookStart = board.getCell(start.getRow(), rookCol);
+            rookEnd = board.getCell(start.getRow(), rookDestCol);
+            rookPiece = rookStart.getPiece();
+            if (rookPiece != null) {
+                rookEnd.setPiece(rookPiece);
+                rookStart.setPiece(null);
+            }
         }
 
         // Make the move temporarily
@@ -265,6 +380,10 @@ public class Game implements Serializable {
         end.setPiece(endPiece);
         if (enPassant && capturedCell != null) {
             capturedCell.setPiece(capturedPawn);
+        }
+        if (castling && rookStart != null && rookEnd != null && rookPiece != null) {
+            rookStart.setPiece(rookPiece);
+            rookEnd.setPiece(null);
         }
 
         return isSafe;

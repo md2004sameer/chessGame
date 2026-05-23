@@ -4,6 +4,7 @@ public class RoomResponse {
     private String roomId;
     private String creatorName;
     private String joinedPlayerName;
+    private String playerToken;
     private String status; // "waiting", "active", "completed"
     private long createdAt;
     private String joinUrl;
@@ -42,6 +43,14 @@ public class RoomResponse {
 
     public void setJoinedPlayerName(String joinedPlayerName) {
         this.joinedPlayerName = joinedPlayerName;
+    }
+
+    public String getPlayerToken() {
+        return playerToken;
+    }
+
+    public void setPlayerToken(String playerToken) {
+        this.playerToken = playerToken;
     }
 
     public String getStatus() {

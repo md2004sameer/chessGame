@@ -28,11 +28,18 @@ public class PawnMovementStrategy implements MovementStrategy {
                    board.isCellEmpty(endRow, endCol);
         }
 
-        // Diagonal capture
+        // Diagonal capture or en-passant capture
         boolean isDiagonalMove = Math.abs(endCol - startCol) == 1 && endRow == startRow + direction;
         if (isDiagonalMove) {
-            return end.getPiece() != null &&
-                   start.getPiece().isWhite() != end.getPiece().isWhite();
+            if (end.getPiece() != null) {
+                return start.getPiece().isWhite() != end.getPiece().isWhite();
+            }
+
+            String enPassantTarget = board.getEnPassantTarget();
+            if (enPassantTarget != null && !enPassantTarget.equals("-")) {
+                String endPos = String.format("%c%d", (char)('a' + endCol), 8 - endRow);
+                return endPos.equals(enPassantTarget);
+            }
         }
 
         return false;

@@ -16,11 +16,17 @@ public class Room implements Serializable {
 
     private String roomId;
     private String creatorName;
+    private String creatorToken;
     private String joinerName;
+    private String joinerToken;
     private Game game;
     private RoomStatus status;
     private long createdAt;
     private long updatedAt;
+    private String lastMoveFrom;
+    private String lastMoveTo;
+    private String lastMovePromotion;
+    private long lastMoveNumber;
     private Map<String, Object> metadata; // For future extensions
 
     public Room(String roomId, String creatorName) {
@@ -47,6 +53,34 @@ public class Room implements Serializable {
     public void setJoinerName(String joinerName) {
         this.joinerName = joinerName;
         this.updatedAt = System.currentTimeMillis();
+    }
+
+    public String getCreatorToken() {
+        return creatorToken;
+    }
+
+    public void setCreatorToken(String creatorToken) {
+        this.creatorToken = creatorToken;
+    }
+
+    public String getJoinerToken() {
+        return joinerToken;
+    }
+
+    public void setJoinerToken(String joinerToken) {
+        this.joinerToken = joinerToken;
+    }
+
+    public boolean isCreatorAuthorized(String playerName, String playerToken) {
+        return creatorName.equals(playerName) && creatorToken != null && creatorToken.equals(playerToken);
+    }
+
+    public boolean isJoinerAuthorized(String playerName, String playerToken) {
+        return joinerName != null && joinerName.equals(playerName) && joinerToken != null && joinerToken.equals(playerToken);
+    }
+
+    public boolean isPlayerAuthorized(String playerName, String playerToken) {
+        return isCreatorAuthorized(playerName, playerToken) || isJoinerAuthorized(playerName, playerToken);
     }
 
     public Game getGame() {
@@ -77,6 +111,30 @@ public class Room implements Serializable {
 
     public void setUpdatedAt(long updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getLastMoveFrom() {
+        return lastMoveFrom;
+    }
+
+    public String getLastMoveTo() {
+        return lastMoveTo;
+    }
+
+    public String getLastMovePromotion() {
+        return lastMovePromotion;
+    }
+
+    public long getLastMoveNumber() {
+        return lastMoveNumber;
+    }
+
+    public void setLastMove(String from, String to, String promotion) {
+        this.lastMoveFrom = from;
+        this.lastMoveTo = to;
+        this.lastMovePromotion = promotion;
+        this.lastMoveNumber++;
+        this.updatedAt = System.currentTimeMillis();
     }
 
     public Map<String, Object> getMetadata() {

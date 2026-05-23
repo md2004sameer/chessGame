@@ -1,7 +1,5 @@
 package com.example.ChessGame.service;
-
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
@@ -29,14 +27,15 @@ public class StockfishService {
 
     private static final Logger LOG = Logger.getLogger(StockfishService.class.getName());
 
-    @Value("${stockfish.path:stockfish}")
-    private String stockfishPath;
+    private final String stockfishPath;
+    private final int poolSize;
+    private final long timeoutMs;
 
-    @Value("${stockfish.pool-size:4}")
-    private int poolSize;
-
-    @Value("${stockfish.timeout-ms:2000}")
-    private long timeoutMs;
+    public StockfishService(StockfishProperties properties) {
+        this.stockfishPath = properties.getPath();
+        this.poolSize = properties.getPoolSize();
+        this.timeoutMs = properties.getTimeoutMs();
+    }
 
     /** Pool of ready-to-use engine instances. */
     private BlockingQueue<EngineInstance> pool;

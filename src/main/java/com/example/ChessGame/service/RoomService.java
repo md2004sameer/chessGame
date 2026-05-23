@@ -12,11 +12,28 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class RoomService {
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
     private static final Logger logger = LoggerFactory.getLogger(RoomService.class);
+    private static final long WAITING_ROOM_EXPIRATION_MS = TimeUnit.MINUTES.toMillis(30);
+    private static final long COMPLETED_ROOM_EXPIRATION_MS = TimeUnit.HOURS.toMillis(6);
+    private static final long ABANDONED_ROOM_EXPIRATION_MS = TimeUnit.MINUTES.toMillis(60);
+    private static final long ACTIVE_ROOM_STALE_MS = TimeUnit.HOURS.toMillis(24);
+
+    private final ScheduledExecutorService cleanupExecutor = new ScheduledThreadPoolExecutor(1, r -> {
+        Thread thread = new Thread(r, "room-cleanup-thread");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    public RoomService() {
+        cleanupExecutor.scheduleAtFixedRate(this::removeExpiredRooms, 1, 1, TimeUnit.MINUTES);
+    }
 
     /**
      * Create a new game room
@@ -26,6 +43,8 @@ public class RoomService {
         
         String id = generateRoomId();
         Room room = new Room(id, name);
+        String creatorToken = createPlayerToken();
+        room.setCreatorToken(creatorToken);
         
         // Create initial game with placeholder
         Player white = new Player(name, true);
@@ -42,7 +61,29 @@ public class RoomService {
     /**
      * Join an existing room
      */
+    public static class JoinResult {
+        private final String role;
+        private final String playerToken;
+
+        public JoinResult(String role, String playerToken) {
+            this.role = role;
+            this.playerToken = playerToken;
+        }
+
+        public String getRole() {
+            return role;
+        }
+
+        public String getPlayerToken() {
+            return playerToken;
+        }
+    }
+
     public synchronized String joinRoom(String roomId, String playerName) throws IllegalArgumentException {
+        return joinRoom(roomId, playerName, null).getRole();
+    }
+
+    public synchronized JoinResult joinRoom(String roomId, String playerName, String playerToken) throws IllegalArgumentException {
         logger.info("Join room requested: roomId={}, playerName={}", roomId, playerName);
         
         String name = validatePlayerName(playerName);
@@ -52,28 +93,34 @@ public class RoomService {
             throw new IllegalArgumentException("Room not found");
         }
 
-        // Existing players can refresh/reconnect even after the game is active.
         if (name.equals(room.getCreatorName())) {
+            if (!room.isCreatorAuthorized(name, playerToken)) {
+                throw new IllegalArgumentException("Invalid token for creator");
+            }
             logger.info("Creator {} rejoined room {}", name, roomId);
-            return "white";
+            return new JoinResult("white", room.getCreatorToken());
         }
 
         if (name.equals(room.getJoinerName())) {
+            if (!room.isJoinerAuthorized(name, playerToken)) {
+                throw new IllegalArgumentException("Invalid token for joiner");
+            }
             logger.info("Player {} rejoined room {} as black", name, roomId);
-            return "black";
+            return new JoinResult("black", room.getJoinerToken());
         }
 
         if (room.getStatus() != Room.RoomStatus.WAITING) {
             throw new IllegalArgumentException("Room is not available (status: " + room.getStatus() + ")");
         }
 
-        // Only allow one joiner
         if (room.isFull()) {
             throw new IllegalArgumentException("Room is full");
         }
 
         // Set joiner and update game
         room.setJoinerName(name);
+        String joinerToken = createPlayerToken();
+        room.setJoinerToken(joinerToken);
         room.setStatus(Room.RoomStatus.ACTIVE);
         
         if (room.getGame() != null) {
@@ -81,7 +128,7 @@ public class RoomService {
         }
         
         logger.info("Player {} joined room {} as black", name, roomId);
-        return "black";
+        return new JoinResult("black", joinerToken);
     }
 
     /**
@@ -110,6 +157,10 @@ public class RoomService {
      * Apply a move in a room's game
      */
     public synchronized boolean applyMove(String roomId, String from, String to, String promotion, String playerName) {
+        return applyMove(roomId, from, to, promotion, playerName, null);
+    }
+
+    public synchronized boolean applyMove(String roomId, String from, String to, String promotion, String playerName, String playerToken) {
         Room room = rooms.get(roomId);
         if (room == null || room.getGame() == null) {
             return false;
@@ -118,6 +169,11 @@ public class RoomService {
         if (room.getStatus() != Room.RoomStatus.ACTIVE || !room.isFull()) {
             logger.warn("Move rejected before room is active: roomId={}, playerName={}, status={}",
                     roomId, playerName, room.getStatus());
+            return false;
+        }
+
+        if (!room.isPlayerAuthorized(playerName, playerToken)) {
+            logger.warn("Invalid move token for player {} in room {}", playerName, roomId);
             return false;
         }
 
@@ -139,7 +195,12 @@ public class RoomService {
             return false;
         }
 
-        game.makeMove(move, game.getCurrentTurn());
+        boolean moved = game.makeMove(move, game.getCurrentTurn());
+        if (!moved) {
+            return false;
+        }
+
+        room.setLastMove(from, to, promotion);
         room.setUpdatedAt(System.currentTimeMillis());
         return true;
     }
@@ -209,5 +270,41 @@ public class RoomService {
         
         // Fallback to UUID if numeric IDs exhausted
         return java.util.UUID.randomUUID().toString();
+    }
+
+    private String createPlayerToken() {
+        return java.util.UUID.randomUUID().toString();
+    }
+
+    private void removeExpiredRooms() {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Room> entry : rooms.entrySet()) {
+            Room room = entry.getValue();
+            if (isExpired(room, now)) {
+                rooms.remove(entry.getKey());
+                logger.info("Expired room removed: {} (status={}, updatedAt={})",
+                        room.getRoomId(), room.getStatus(), room.getUpdatedAt());
+            }
+        }
+    }
+
+    private boolean isExpired(Room room, long now) {
+        long age = now - room.getUpdatedAt();
+        switch (room.getStatus()) {
+            case WAITING:
+                return age > WAITING_ROOM_EXPIRATION_MS;
+            case ACTIVE:
+                return age > ACTIVE_ROOM_STALE_MS;
+            case COMPLETED:
+                return age > COMPLETED_ROOM_EXPIRATION_MS;
+            case ABANDONED:
+                return age > ABANDONED_ROOM_EXPIRATION_MS;
+            default:
+                return false;
+        }
+    }
+
+    public void shutdownCleanupExecutor() {
+        cleanupExecutor.shutdownNow();
     }
 }

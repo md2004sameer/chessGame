@@ -2,6 +2,8 @@ package com.example.ChessGame.entity;
 
 public class Board {
     Cell[][] cells;
+    private String enPassantTarget = "-";
+
     public Board() {
         cells = new Cell[8][8];
         for (int i = 0; i < 8; i++) {
@@ -15,6 +17,12 @@ public class Board {
     }
     public Cell getCell(int x, int y) {
         return cells[x][y];
+    }
+    public String getEnPassantTarget() {
+        return enPassantTarget;
+    }
+    public void setEnPassantTarget(String enPassantTarget) {
+        this.enPassantTarget = enPassantTarget;
     }
     public void initializeBoard() {
         // Initialize White Pieces (Bottom of board - row 6,7)

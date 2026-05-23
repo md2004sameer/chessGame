@@ -78,21 +78,76 @@ public class GameStateChecker {
     }
 
     private boolean isMoveSafe(Cell start, Cell end) {
-        // Store the current state
         Piece startPiece = start.getPiece();
         Piece endPiece = end.getPiece();
         boolean isWhite = startPiece.isWhite();
 
-        // Make the move
+        boolean isEnPassant = false;
+        Cell enPassantCapturedCell = null;
+        Piece enPassantCapturedPawn = null;
+
+        boolean isCastling = false;
+        Cell castlingRookStart = null;
+        Cell castlingRookEnd = null;
+        Piece castlingRookPiece = null;
+
+        // Detect en-passant capture
+        if (startPiece instanceof com.example.ChessGame.entity.piece.Pawn) {
+            int startRow = start.getRow();
+            int startCol = start.getCol();
+            int endRow = end.getRow();
+            int endCol = end.getCol();
+            boolean diagonal = Math.abs(endCol - startCol) == 1 && endRow == startRow + (startPiece.isWhite() ? -1 : 1);
+            if (diagonal && endPiece == null) {
+                String target = board.getEnPassantTarget();
+                String endPos = String.format("%c%d", (char)('a' + endCol), 8 - endRow);
+                if (target != null && target.equals(endPos)) {
+                    isEnPassant = true;
+                    int capturedRow = startRow + (startPiece.isWhite() ? -1 : 1);
+                    enPassantCapturedCell = board.getCell(capturedRow, endCol);
+                    enPassantCapturedPawn = enPassantCapturedCell.getPiece();
+                }
+            }
+        }
+
+        // Detect castling move
+        if (startPiece instanceof com.example.ChessGame.entity.piece.King) {
+            int startRow = start.getRow();
+            int startCol = start.getCol();
+            int endCol = end.getCol();
+            if (startRow == end.getRow() && Math.abs(startCol - endCol) == 2) {
+                isCastling = true;
+                int rookCol = endCol > startCol ? 7 : 0;
+                int rookDestCol = endCol > startCol ? 5 : 3;
+                castlingRookStart = board.getCell(startRow, rookCol);
+                castlingRookEnd = board.getCell(startRow, rookDestCol);
+                castlingRookPiece = castlingRookStart.getPiece();
+            }
+        }
+
+        // Make the move simulation
         end.setPiece(startPiece);
         start.setPiece(null);
+        if (isEnPassant && enPassantCapturedCell != null) {
+            enPassantCapturedCell.setPiece(null);
+        }
+        if (isCastling && castlingRookStart != null && castlingRookEnd != null && castlingRookPiece != null) {
+            castlingRookEnd.setPiece(castlingRookPiece);
+            castlingRookStart.setPiece(null);
+        }
 
-        // Check if the king is still in check
         boolean isSafe = !isKingInCheck(isWhite);
 
-        // Restore the position
+        // Restore the board
         start.setPiece(startPiece);
         end.setPiece(endPiece);
+        if (isEnPassant && enPassantCapturedCell != null) {
+            enPassantCapturedCell.setPiece(enPassantCapturedPawn);
+        }
+        if (isCastling && castlingRookStart != null && castlingRookEnd != null) {
+            castlingRookStart.setPiece(castlingRookPiece);
+            castlingRookEnd.setPiece(null);
+        }
 
         return isSafe;
     }
