@@ -215,6 +215,12 @@
     <div class="start-form fade-in">
         <h2 style="color: #2c3e50; margin-bottom: 30px;">Choose Your Game Mode</h2>
         
+        <div th:if="${error != null}" style="margin-bottom:12px;">
+            <div style="background:#ffdddd;color:#8b0000;padding:10px;border-radius:8px;border:1px solid #f5c2c2;">
+                <strong>Error:</strong> <span th:text="${error}"></span>
+            </div>
+        </div>
+
         <div class="mode-selector">
             <div class="mode-option">
                 <input type="radio" id="aiMode" name="gameMode" value="ai" checked>
@@ -257,6 +263,22 @@
                 </button>
             </div>
         </form>
+
+        <div style="margin-top: 24px; text-align:left;">
+            <h3 style="margin-top:0;">Play Online (Multiplayer)</h3>
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <form id="createRoomForm" action="/rooms" method="post" style="display:flex; gap:8px; align-items:center;">
+                    <input id="createPlayerName" type="text" name="playerName" placeholder="Your name" required th:value="${playerName}" style="padding:8px;border-radius:8px;border:1px solid #ddd;">
+                    <button type="submit" class="button button-secondary">Create Room</button>
+                </form>
+
+                <form id="joinRoomForm" onsubmit="joinRoom(event)" style="display:flex; gap:8px; align-items:center;">
+                    <input type="text" id="joinRoomId" placeholder="Room ID" required style="padding:8px;border-radius:8px;border:1px solid #ddd;">
+                    <input type="text" id="joinName" placeholder="Your name" required style="padding:8px;border-radius:8px;border:1px solid #ddd;">
+                    <button type="submit" class="button button-secondary">Join Room</button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -370,6 +392,14 @@
             // Submit the form after a short delay for visual feedback
             setTimeout(() => this.submit(), 500);
         });
+
+        function joinRoom(e) {
+            e.preventDefault();
+            const roomId = document.getElementById('joinRoomId').value.trim();
+            const name = document.getElementById('joinName').value.trim();
+            if (!roomId || !name) return;
+            window.location.href = '/room/' + encodeURIComponent(roomId) + '?name=' + encodeURIComponent(name);
+        }
     </script>
 </body>
 </html>

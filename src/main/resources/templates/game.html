@@ -2,6 +2,7 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <title>Chess Game</title>
+    <script src="/js/stomp.umd.min.js"></script>
     <style>
         /* Standard CSS reset for layout */
         *, *::before, *::after { box-sizing: border-box; }
@@ -306,6 +307,64 @@
             color: #56646e;
             margin-bottom: 12px;
         }
+        /* Promotion modal styles */
+        .promotion-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.55);
+            z-index: 10001;
+        }
+
+        .promotion-modal.show {
+            display: flex;
+        }
+
+        .promotion-card {
+            background: white;
+            padding: 24px 28px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+
+        .promotion-card h3 {
+            margin: 0 0 16px;
+            color: #2c3e50;
+        }
+
+        .promotion-pieces {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .promotion-piece-btn {
+            width: 64px;
+            height: 64px;
+            font-size: 38px;
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            color: inherit;
+            margin: 0;
+        }
+
+        .promotion-piece-btn:hover {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76,175,80,0.35);
+        }
+
         /* Confirm modal styles */
         .confirm-modal {
             position: fixed;
@@ -333,16 +392,22 @@
 </head>
 <body>
     <div class="game-info">
-        <h2 th:text="'Current Turn: ' + ${currentPlayer.name} + ' (' + (${currentPlayer.white} ? 'White' : 'Black') + ')'">Current Turn</h2>
-        <p th:if="${gameStatus.name() == 'ACTIVE'}" th:text="${currentPlayer.name} + '\'s turn to move'">Player's turn</p>
-        <p th:if="${gameStatus.name() != 'ACTIVE'}" th:text="'Game Status: ' + ${gameStatus}">Game Status</p>
+        <h2 id="turnTitle" th:text="'Current Turn: ' + ${currentPlayer.name} + ' (' + (${currentPlayer.white} ? 'White' : 'Black') + ')'">Current Turn</h2>
+        <p id="statusText" th:if="${gameStatus.name() == 'ACTIVE'}" th:text="${currentPlayer.name} + '\'s turn to move'">Player's turn</p>
+        <p id="statusText" th:if="${gameStatus.name() != 'ACTIVE'}" th:text="'Game Status: ' + ${gameStatus}">Game Status</p>
+        <div th:if="${roomId != null}" class="player-info" style="margin-top:8px;">
+            <div class="player-role">
+                Room: <strong id="roomCode" th:text="${roomId}">000000</strong>
+            </div>
+            <button type="button" id="copyRoomLink" style="background:#6c757d;">Copy Invite Link</button>
+        </div>
         <div class="player-info">
             <div class="player-tag">
-                <div th:text="${whitePlayer.name} + ' (White)'"></div>
+                <div id="whitePlayerLabel" th:text="${whitePlayer.name} + ' (White)'"></div>
                 <div th:if="${whiteIsAI}" class="ai-badge">AI</div>
             </div>
             <div class="player-tag">
-                <div th:text="${blackPlayer.name} + ' (Black)'"></div>
+                <div id="blackPlayerLabel" th:text="${blackPlayer.name} + ' (Black)'"></div>
                 <div th:if="${blackIsAI}" class="ai-badge">AI</div>
             </div>
         </div>
@@ -386,67 +451,143 @@
                 <button type="submit" style="background:#6c757d;">Exit Game</button>
             </form>
             <div class="player-role">
-                <span th:if="${viewAsWhite}" th:text="'You are playing: ' + (${whiteIsAI} ? 'AI (White)' : 'White')"></span>
-                <span th:unless="${viewAsWhite}" th:text="'You are playing: ' + (${blackIsAI} ? 'AI (Black)' : 'Black')"></span>
+                <span id="playerRoleLabel" th:if="${viewAsWhite}" th:text="'You are playing: ' + (${whiteIsAI} ? 'AI (White)' : 'White')"></span>
+                <span id="playerRoleLabel" th:unless="${viewAsWhite}" th:text="'You are playing: ' + (${blackIsAI} ? 'AI (Black)' : 'Black')"></span>
             </div>
         </div>
     </div>
 
+    <script th:inline="javascript">
+        const ROOM_ID = /*[[${roomId}]]*/ null;
+        const PLAYER_NAME = /*[[${playerName}]]*/ null;
+    </script>
+
     <script>
         let selectedCell = null;
         let validMoves = [];
+        let currentRoomState = null;
+        let roomRole = null;
+        const isRoomGame = Boolean(ROOM_ID);
+
+        // Piece sets for promotion dialog keyed by color
+        const PROMOTION_PIECES = {
+            white: [
+                { piece: 'q', symbol: '♕', label: 'Queen'  },
+                { piece: 'r', symbol: '♖', label: 'Rook'   },
+                { piece: 'b', symbol: '♗', label: 'Bishop' },
+                { piece: 'n', symbol: '♘', label: 'Knight' }
+            ],
+            black: [
+                { piece: 'q', symbol: '♛', label: 'Queen'  },
+                { piece: 'r', symbol: '♜', label: 'Rook'   },
+                { piece: 'b', symbol: '♝', label: 'Bishop' },
+                { piece: 'n', symbol: '♞', label: 'Knight' }
+            ]
+        };
+
+        // Determine which color is currently moving from server-rendered text
+        let currentColorIsWhite = document.querySelector('.game-info h2')
+            ?.textContent?.includes('White') ?? true;
 
         function clearHighlights() {
             document.querySelectorAll('.cell').forEach(cell => {
-                cell.classList.remove('valid-move');
-                cell.classList.remove('selected');
+                cell.classList.remove('valid-move', 'selected');
             });
             validMoves = [];
         }
 
         function highlightValidMoves(position) {
-            fetch('/validMoves/' + position)
-                .then(response => response.json())
+            const url = isRoomGame
+                ? '/rooms/' + encodeURIComponent(ROOM_ID) + '/validMoves/' + encodeURIComponent(position)
+                : '/validMoves/' + encodeURIComponent(position);
+            fetch(url)
+                .then(r => r.json())
                 .then(moves => {
                     validMoves = moves;
                     moves.forEach(move => {
                         const cell = document.querySelector(`[data-position="${move}"]`);
-                        if (cell) {
-                            cell.classList.add('valid-move');
-                        }
+                        if (cell) cell.classList.add('valid-move');
                     });
                 });
         }
 
-        function makeMove(from, to) {
+        function makeMove(from, to, promotion) {
+            if (isRoomGame) {
+                makeRoomMove(from, to, promotion);
+                return;
+            }
+
             const formData = new FormData();
             formData.append('from', from);
             formData.append('to', to);
+            if (promotion) formData.append('promotion', promotion);
 
-            fetch('/move', {
-                method: 'POST',
-                body: formData
-            }).then(() => {
-                window.location.reload();
+            fetch('/move', { method: 'POST', body: formData })
+                .then(() => window.location.reload());
+        }
+
+        /** Returns true if the piece on `cell` is a pawn heading to a promotion rank. */
+        function isPromotionMove(fromCell, toPosition) {
+            const symbol = fromCell.querySelector('span')?.textContent?.trim();
+            const isPawn = symbol === '♙' || symbol === '♟';
+            if (!isPawn) return false;
+            const toRank = parseInt(toPosition[1], 10);
+            // white pawns promote on rank 8, black on rank 1
+            return (currentColorIsWhite && toRank === 8) ||
+                   (!currentColorIsWhite && toRank === 1);
+        }
+
+        /** Show promotion dialog then resolve with the chosen piece letter. */
+        function askPromotion() {
+            return new Promise(resolve => {
+                const modal  = document.getElementById('promotionModal');
+                const pieces = document.getElementById('promotionPieces');
+                const set    = currentColorIsWhite ? PROMOTION_PIECES.white : PROMOTION_PIECES.black;
+
+                pieces.innerHTML = '';
+                set.forEach(({ piece, symbol, label }) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'promotion-piece-btn';
+                    btn.textContent = symbol;
+                    btn.title = label;
+                    btn.setAttribute('aria-label', label);
+                    btn.addEventListener('click', () => {
+                        modal.classList.remove('show');
+                        modal.setAttribute('aria-hidden', 'true');
+                        resolve(piece);
+                    });
+                    pieces.appendChild(btn);
+                });
+
+                modal.classList.add('show');
+                modal.setAttribute('aria-hidden', 'false');
+                // focus first button for keyboard accessibility
+                pieces.querySelector('button')?.focus();
             });
         }
 
         function attachCellListeners() {
             document.querySelectorAll('.cell').forEach(cell => {
-                cell.addEventListener('click', () => {
+                cell.addEventListener('click', async () => {
+                    if (isRoomGame && !canCurrentRoomPlayerMove()) {
+                        return;
+                    }
+
                     const position = cell.dataset.position;
 
                     if (!selectedCell) {
-                        // First click - select piece and show valid moves
                         if (cell.querySelector('span').textContent.trim()) {
                             selectedCell = cell;
                             cell.classList.add('selected');
                             highlightValidMoves(position);
                         }
                     } else {
-                        // Second click - make the move if valid
                         if (validMoves.includes(position)) {
-                            makeMove(selectedCell.dataset.position, position);
+                            let promotion = null;
+                            if (isPromotionMove(selectedCell, position)) {
+                                promotion = await askPromotion();
+                            }
+                            makeMove(selectedCell.dataset.position, position, promotion);
                         }
                         clearHighlights();
                         selectedCell = null;
@@ -457,7 +598,140 @@
 
         attachCellListeners();
 
-        // Server controls initial orientation; no client-side flip applied to avoid mismatch with server coordinates.
+        function canCurrentRoomPlayerMove() {
+            if (!currentRoomState || currentRoomState.roomStatus !== 'ACTIVE') return false;
+            if (!PLAYER_NAME || currentRoomState.currentPlayer !== PLAYER_NAME) return false;
+            if (roomRole === 'white') return currentColorIsWhite;
+            if (roomRole === 'black') return !currentColorIsWhite;
+            return false;
+        }
+
+        function makeRoomMove(from, to, promotion) {
+            const formData = new FormData();
+            formData.append('from', from);
+            formData.append('to', to);
+            formData.append('playerName', PLAYER_NAME);
+            if (promotion) formData.append('promotion', promotion);
+
+            fetch('/room/' + encodeURIComponent(ROOM_ID) + '/move', {
+                method: 'POST',
+                body: formData
+            })
+                .then(r => r.json())
+                .then(resp => {
+                    if (!resp.success && resp.message) {
+                        setRoomMessage(resp.message);
+                    }
+                    return refreshRoomState();
+                });
+        }
+
+        function joinCurrentRoom() {
+            const formData = new FormData();
+            formData.append('playerName', PLAYER_NAME || 'Player');
+
+            return fetch('/room/' + encodeURIComponent(ROOM_ID) + '/join', {
+                method: 'POST',
+                body: formData
+            })
+                .then(r => r.json())
+                .then(resp => {
+                    if (!resp.success) {
+                        setRoomMessage(resp.error || 'Could not join room');
+                        return;
+                    }
+                    roomRole = resp.role;
+                    if (resp.state) applyRoomState(resp.state);
+                });
+        }
+
+        function refreshRoomState() {
+            return fetch('/room/' + encodeURIComponent(ROOM_ID) + '/state')
+                .then(r => r.json())
+                .then(applyRoomState)
+                .catch(() => setRoomMessage('Connection lost. Retrying...'));
+        }
+
+        function applyRoomState(state) {
+            if (!state || !state.success) {
+                setRoomMessage(state?.message || 'Waiting for room state...');
+                return;
+            }
+
+            currentRoomState = state;
+            currentColorIsWhite = state.currentPlayer === state.whitePlayerName;
+
+            updateBoardFromState(state);
+            updateRoomLabels(state);
+        }
+
+        function updateBoardFromState(state) {
+            if (!state.board) return;
+            state.board.flat().forEach(cellState => {
+                const cell = document.querySelector(`[data-position="${cellState.position}"]`);
+                if (!cell) return;
+                const piece = cell.querySelector('span');
+                if (piece) piece.textContent = cellState.display || '';
+            });
+        }
+
+        function updateRoomLabels(state) {
+            const whiteName = state.whitePlayerName || 'White';
+            const blackName = state.blackPlayerName || 'Waiting for opponent...';
+            document.getElementById('whitePlayerLabel').textContent = whiteName + ' (White)';
+            document.getElementById('blackPlayerLabel').textContent = blackName + ' (Black)';
+
+            const colorText = state.currentPlayer === whiteName ? 'White' : 'Black';
+            document.getElementById('turnTitle').textContent = 'Current Turn: ' + state.currentPlayer + ' (' + colorText + ')';
+
+            if (state.roomStatus === 'ACTIVE' && state.playerCount === 2) {
+                document.getElementById('statusText').textContent = state.currentPlayer + "'s turn to move";
+            } else {
+                document.getElementById('statusText').textContent = 'Waiting for opponent to join. Share the room link or room code.';
+            }
+
+            const roleText = roomRole
+                ? 'You are playing: ' + (roomRole === 'white' ? 'White' : 'Black')
+                : 'Joining room...';
+            const canMoveText = canCurrentRoomPlayerMove() ? ' - your turn' : '';
+            document.getElementById('playerRoleLabel').textContent = roleText + canMoveText;
+        }
+
+        function setRoomMessage(message) {
+            const status = document.getElementById('statusText');
+            if (status) status.textContent = message;
+        }
+
+        function setupRoomGame() {
+            if (!PLAYER_NAME || !PLAYER_NAME.trim()) {
+                const enteredName = window.prompt('Enter your name to join this room');
+                if (!enteredName || !enteredName.trim()) {
+                    setRoomMessage('Enter a player name to join this room.');
+                    return;
+                }
+                window.location.href = '/room/' + encodeURIComponent(ROOM_ID) + '?name=' + encodeURIComponent(enteredName.trim());
+                return;
+            }
+
+            const copyButton = document.getElementById('copyRoomLink');
+            if (copyButton) {
+                copyButton.addEventListener('click', () => {
+                    const inviteUrl = window.location.origin + '/room/' + encodeURIComponent(ROOM_ID);
+                    navigator.clipboard?.writeText(inviteUrl);
+                    copyButton.textContent = 'Link Copied';
+                    setTimeout(() => copyButton.textContent = 'Copy Invite Link', 1500);
+                });
+            }
+
+            joinCurrentRoom().then(() => {
+                refreshRoomState();
+                setInterval(refreshRoomState, 1500);
+            });
+        }
+
+        if (isRoomGame) {
+            setupRoomGame();
+        }
     </script>
 
     <!-- Celebration overlay: shown when someone wins -->
@@ -467,6 +741,16 @@
             <div class="celebration-sub" th:text="'Winner: ' + ${currentPlayer.name}">Winner: Player</div>
             <div>
                 <form action="/exit" method="post" style="display:inline;"><button type="submit">Back to Start</button></form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Promotion modal: shown when a pawn reaches the back rank -->
+    <div id="promotionModal" class="promotion-modal" aria-hidden="true">
+        <div class="promotion-card" role="dialog" aria-modal="true" aria-labelledby="promotionTitle">
+            <h3 id="promotionTitle">Promote your pawn</h3>
+            <div class="promotion-pieces" id="promotionPieces">
+                <!-- pieces injected by JS based on current player color -->
             </div>
         </div>
     </div>

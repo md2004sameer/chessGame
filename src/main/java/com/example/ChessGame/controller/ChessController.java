@@ -16,9 +16,13 @@ import java.util.List;
 public class ChessController {
     // per-session game state will be stored in HttpSession; no controller-level shared game/flags
     private final com.example.ChessGame.service.StockfishService stockfish;
+    private final com.example.ChessGame.service.RoomService roomService;
+    private final com.example.ChessGame.service.MessagingService messagingService;
 
-    public ChessController(com.example.ChessGame.service.StockfishService stockfish) {
+    public ChessController(com.example.ChessGame.service.StockfishService stockfish, com.example.ChessGame.service.RoomService roomService, com.example.ChessGame.service.MessagingService messagingService) {
         this.stockfish = stockfish;
+        this.roomService = roomService;
+        this.messagingService = messagingService;
     }
 
     @GetMapping("/")
@@ -93,6 +97,79 @@ public class ChessController {
         return "game";
     }
 
+    @PostMapping("/rooms")
+    public String createRoom(@RequestParam(required = false) String playerName, org.springframework.web.servlet.mvc.support.RedirectAttributes redirectAttributes) {
+        // validate the name
+        String name = (playerName == null) ? "" : playerName.trim();
+        if (name.isEmpty()) {
+            redirectAttributes.addFlashAttribute("error", "Please provide a name to create a room.");
+            return "redirect:/";
+        }
+
+        try {
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).info("Attempting to create room for name={}", name);
+            String id = roomService.createRoom(name);
+            // safe encoding using Charset overload
+            String encodedName = java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8);
+            return "redirect:/room/" + id + "?name=" + encodedName;
+        } catch (Exception e) {
+            // log and surface friendly message
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).error("Failed to create room for name={}", name, e);
+            redirectAttributes.addFlashAttribute("error", "Could not create room: " + e.getMessage());
+            // preserve the submitted name so the user does not have to retype it
+            redirectAttributes.addFlashAttribute("playerName", playerName);
+            return "redirect:/";
+        }
+    }
+
+    @GetMapping("/room/{roomId}")
+    public String showRoom(@PathVariable String roomId, @RequestParam(required = false) String name, Model model) {
+        model.addAttribute("roomId", roomId);
+        model.addAttribute("playerName", name);
+        // reuse the same game view template - the page will use WebSockets to subscribe to the room
+        model.addAttribute("positions", generatePositions());
+
+        // Provide safe defaults so Thymeleaf can render the template even before the game starts
+        com.example.ChessGame.entity.Game roomGame = roomService.getGame(roomId);
+        if (roomGame != null) {
+            model.addAttribute("board", roomGame.getBoard());
+            model.addAttribute("currentPlayer", roomGame.getCurrentTurn());
+            model.addAttribute("gameStatus", roomGame.getGameStatus());
+            model.addAttribute("whitePlayer", roomGame.getWhitePlayer());
+            model.addAttribute("blackPlayer", roomGame.getBlackPlayer());
+            model.addAttribute("capturedWhite", roomGame.getCapturedWhite());
+            model.addAttribute("capturedBlack", roomGame.getCapturedBlack());
+
+            // decide view orientation based on which player is viewing
+            boolean viewAsWhite = (name != null && name.equals(roomGame.getWhitePlayer().getName()));
+            model.addAttribute("viewAsWhite", viewAsWhite);
+
+            // provide row indices according to view orientation so cells render correctly
+            java.util.List<Integer> viewRowIndices = new java.util.ArrayList<>();
+            if (viewAsWhite) {
+                for (int i = 0; i < 8; i++) viewRowIndices.add(i);
+            } else {
+                for (int i = 7; i >= 0; i--) viewRowIndices.add(i);
+            }
+            model.addAttribute("viewRowIndices", viewRowIndices);
+        } else {
+            // placeholder values shown until opponent joins
+            model.addAttribute("board", new com.example.ChessGame.entity.Board());
+            model.addAttribute("currentPlayer", new com.example.ChessGame.entity.Player(name == null ? "Player" : name, true));
+            model.addAttribute("gameStatus", com.example.ChessGame.entity.GameStatus.STARTED);
+            model.addAttribute("whitePlayer", new com.example.ChessGame.entity.Player(name == null ? "Player" : name, true));
+            model.addAttribute("blackPlayer", new com.example.ChessGame.entity.Player("Waiting...", false));
+            model.addAttribute("capturedWhite", java.util.Collections.emptyList());
+            model.addAttribute("capturedBlack", java.util.Collections.emptyList());
+            model.addAttribute("viewAsWhite", true);
+            java.util.List<Integer> viewRowIndices = new java.util.ArrayList<>();
+            for (int i = 0; i < 8; i++) viewRowIndices.add(i);
+            model.addAttribute("viewRowIndices", viewRowIndices);
+        }
+
+        return "game";
+    }
+
     private List<List<String>> generatePositions() {
         List<List<String>> positions = new ArrayList<>();
         for (int row = 0; row < 8; row++) {
@@ -105,6 +182,133 @@ public class ChessController {
             positions.add(rowPositions);
         }
         return positions;
+    }
+
+    // REST join endpoint to ensure atomic joining for non-STOMP clients
+    @PostMapping("/room/{roomId}/join")
+    @ResponseBody
+    public java.util.Map<String, Object> joinRoomAjax(@PathVariable String roomId, @RequestParam String playerName) {
+        org.slf4j.LoggerFactory.getLogger(ChessController.class).info("REST join requested: roomId={}, playerName={}", roomId, playerName);
+        java.util.Map<String, Object> resp = new java.util.HashMap<>();
+        try {
+            String role = roomService.joinRoom(roomId, playerName);
+            // allow idempotent rejoin by the creator (role == "white") — treat as success
+            resp.put("success", true);
+            resp.put("role", role);
+            // broadcast updated state to any subscribed WS clients
+            sendState(roomId);
+            // also include the canonical state in the REST response so the client doesn't miss it
+            resp.put("state", buildState(roomId));
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).info("REST join success/rejoin: roomId={}, playerName={}, role={}", roomId, playerName, role);
+            return resp;
+        } catch (IllegalArgumentException e) {
+            resp.put("success", false);
+            resp.put("error", e.getMessage());
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).warn("REST join failed: room={}, name={}, error={}", roomId, playerName, e.getMessage());
+            return resp;
+        } catch (Exception e) {
+            resp.put("success", false);
+            resp.put("error", "Unexpected error: " + e.getMessage());
+            org.slf4j.LoggerFactory.getLogger(ChessController.class).error("REST join unexpected error: room={}, name={}, error={}", roomId, playerName, e.getMessage());
+            return resp;
+        }
+    }
+
+    @GetMapping("/room/{roomId}/debug")
+    @ResponseBody
+    public java.util.Map<String,Object> debugRoom(@PathVariable String roomId) {
+        java.util.Map<String,Object> info = roomService.getRoomInfo(roomId);
+        if (info == null) {
+            return java.util.Map.of("found", false);
+        }
+        java.util.Map<String,Object> resp = new java.util.HashMap<>(info);
+        resp.put("found", true);
+        return resp;
+    }
+
+    // Build the MoveResponse state object for a room
+    private com.example.ChessGame.controller.dto.MoveResponse buildState(String roomId) {
+        com.example.ChessGame.entity.Room room = roomService.getRoom(roomId);
+        com.example.ChessGame.entity.Game game = roomService.getGame(roomId);
+        com.example.ChessGame.controller.dto.MoveResponse resp = new com.example.ChessGame.controller.dto.MoveResponse();
+        if (game == null) {
+            resp.setSuccess(false);
+            resp.setMessage("Waiting for opponent or invalid room");
+            if (room != null) {
+                resp.setRoomStatus(room.getStatus().toString());
+                resp.setPlayerCount(room.isFull() ? 2 : 1);
+            }
+            return resp;
+        }
+
+        java.util.List<java.util.List<com.example.ChessGame.controller.dto.MoveResponse.CellDto>> boardState = new java.util.ArrayList<>();
+        for (int r = 0; r < 8; r++) {
+            java.util.List<com.example.ChessGame.controller.dto.MoveResponse.CellDto> rowList = new java.util.ArrayList<>();
+            for (int c = 0; c < 8; c++) {
+                com.example.ChessGame.entity.Cell cell = game.getBoard().getCell(r, c);
+                com.example.ChessGame.controller.dto.MoveResponse.CellDto cellDto = new com.example.ChessGame.controller.dto.MoveResponse.CellDto();
+                char file = (char) ('a' + c);
+                int rank = 8 - r;
+                String pos = String.format("%c%d", file, rank);
+                cellDto.position = pos;
+                if (cell.getPiece() != null) {
+                    cellDto.display = cell.getPiece().getDisplayChar();
+                    cellDto.type = cell.getPiece().getType();
+                    cellDto.color = cell.getPiece().isWhite();
+                } else {
+                    cellDto.display = "";
+                    cellDto.type = "";
+                    cellDto.color = "";
+                }
+                rowList.add(cellDto);
+            }
+            boardState.add(rowList);
+        }
+        resp.setSuccess(true);
+        resp.setBoard(boardState);
+        resp.setCurrentPlayer(game.getCurrentTurn().getName());
+        resp.setGameStatus(game.getGameStatus().toString());
+        // include player names so clients can update UI when someone joins
+        resp.setWhitePlayerName(game.getWhitePlayer().getName());
+        resp.setBlackPlayerName(game.getBlackPlayer().getName());
+        if (room != null) {
+            resp.setRoomStatus(room.getStatus().toString());
+            resp.setPlayerCount(room.isFull() ? 2 : 1);
+        }
+        return resp;
+    }
+
+    // Broadcast room state to WS subscribers (used by REST join and rest-move as well)
+    private void sendState(String roomId) {
+        com.example.ChessGame.controller.dto.MoveResponse resp = buildState(roomId);
+        // use MessagingService for safe send
+        this.messagingService.sendToTopic("/topic/rooms/" + roomId, resp);
+    }
+
+    @GetMapping("/room/{roomId}/state")
+    @ResponseBody
+    public com.example.ChessGame.controller.dto.MoveResponse getRoomState(@PathVariable String roomId) {
+        return buildState(roomId);
+    }
+
+    @PostMapping("/room/{roomId}/move")
+    @ResponseBody
+    public java.util.Map<String,Object> moveInRoom(@PathVariable String roomId,
+                                                   @RequestParam String from,
+                                                   @RequestParam String to,
+                                                   @RequestParam(required = false) String promotion,
+                                                   @RequestParam String playerName) {
+        java.util.Map<String,Object> resp = new java.util.HashMap<>();
+        boolean ok = roomService.applyMove(roomId, from, to, promotion, playerName);
+        if (ok) {
+            resp.put("success", true);
+            // broadcast updated state
+            sendState(roomId);
+        } else {
+            resp.put("success", false);
+            resp.put("message", "Invalid move or not your turn");
+        }
+        return resp;
     }
 
     @PostMapping("/move")
@@ -232,6 +436,36 @@ public class ChessController {
     @ResponseBody
     public List<String> getValidMoves(@PathVariable String position, HttpSession session) {
         Game game = (Game) session.getAttribute("game");
+        if (game == null) {
+            return new ArrayList<>();
+        }
+
+        int row = 8 - Character.getNumericValue(position.charAt(1));
+        int col = position.charAt(0) - 'a';
+        Cell start = game.getBoard().getCell(row, col);
+
+        if (start.getPiece() == null || start.getPiece().isWhite() != game.getCurrentTurn().isWhite()) {
+            return new ArrayList<>();
+        }
+
+        List<String> validMoves = new ArrayList<>();
+        for (int r = 0; r < 8; r++) {
+            for (int c = 0; c < 8; c++) {
+                Cell end = game.getBoard().getCell(r, c);
+                if (start.getPiece().canMove(game.getBoard(), start, end)) {
+                    char file = (char) ('a' + c);
+                    int rank = 8 - r;
+                    validMoves.add(String.format("%c%d", file, rank));
+                }
+            }
+        }
+        return validMoves;
+    }
+
+    @GetMapping("/rooms/{roomId}/validMoves/{position}")
+    @ResponseBody
+    public List<String> getRoomValidMoves(@PathVariable String roomId, @PathVariable String position) {
+        Game game = roomService.getGame(roomId);
         if (game == null) {
             return new ArrayList<>();
         }

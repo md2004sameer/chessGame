@@ -8,6 +8,10 @@ public class MoveResponse {
     private List<List<CellDto>> board;
     private String currentPlayer;
     private String gameStatus;
+    private String whitePlayerName;
+    private String blackPlayerName;
+    private String roomStatus;
+    private int playerCount;
 
     public static class CellDto {
         public String position;
@@ -26,4 +30,12 @@ public class MoveResponse {
     public void setCurrentPlayer(String currentPlayer) { this.currentPlayer = currentPlayer; }
     public String getGameStatus() { return gameStatus; }
     public void setGameStatus(String gameStatus) { this.gameStatus = gameStatus; }
+    public String getWhitePlayerName() { return whitePlayerName; }
+    public void setWhitePlayerName(String whitePlayerName) { this.whitePlayerName = whitePlayerName; }
+    public String getBlackPlayerName() { return blackPlayerName; }
+    public void setBlackPlayerName(String blackPlayerName) { this.blackPlayerName = blackPlayerName; }
+    public String getRoomStatus() { return roomStatus; }
+    public void setRoomStatus(String roomStatus) { this.roomStatus = roomStatus; }
+    public int getPlayerCount() { return playerCount; }
+    public void setPlayerCount(int playerCount) { this.playerCount = playerCount; }
 }
